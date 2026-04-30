@@ -492,7 +492,7 @@ groups:
         assert!(defaults.telemetry.pipeline_metrics);
         assert!(defaults.telemetry.tokio_metrics);
         assert_eq!(
-            defaults.telemetry.runtime_metrics,
+            defaults.telemetry.runtime_metrics.default_level(),
             crate::policy::MetricLevel::Basic
         );
         assert_eq!(
@@ -633,7 +633,11 @@ groups:
             vec![crate::health::PhaseKind::Failed]
         );
         assert_eq!(
-            p1_resolved.policies.telemetry.runtime_metrics,
+            p1_resolved
+                .policies
+                .telemetry
+                .runtime_metrics
+                .default_level(),
             crate::policy::MetricLevel::None
         );
 
@@ -657,7 +661,11 @@ groups:
             ]
         );
         assert_eq!(
-            p2_resolved.policies.telemetry.runtime_metrics,
+            p2_resolved
+                .policies
+                .telemetry
+                .runtime_metrics
+                .default_level(),
             crate::policy::MetricLevel::Basic
         );
         assert_eq!(
@@ -682,7 +690,11 @@ groups:
             vec![crate::health::PhaseKind::Running]
         );
         assert_eq!(
-            p3_resolved.policies.telemetry.runtime_metrics,
+            p3_resolved
+                .policies
+                .telemetry
+                .runtime_metrics
+                .default_level(),
             crate::policy::MetricLevel::None
         );
         assert_eq!(
@@ -778,7 +790,7 @@ groups:
         let partial = find("partial");
         assert_eq!(partial.policies.channel_capacity.control.node, 100);
         assert_eq!(
-            partial.policies.telemetry.runtime_metrics,
+            partial.policies.telemetry.runtime_metrics.default_level(),
             crate::policy::MetricLevel::Detailed,
             "should inherit telemetry from top level"
         );
@@ -794,7 +806,7 @@ groups:
         // Pipeline with explicit overrides.
         let explicit = find("explicit");
         assert_eq!(
-            explicit.policies.telemetry.runtime_metrics,
+            explicit.policies.telemetry.runtime_metrics.default_level(),
             crate::policy::MetricLevel::None
         );
         assert_eq!(explicit.policies.channel_capacity.control.node, 10);
@@ -806,7 +818,11 @@ groups:
         // Pipeline with no policies inherits everything.
         let no_policies = find("no_policies");
         assert_eq!(
-            no_policies.policies.telemetry.runtime_metrics,
+            no_policies
+                .policies
+                .telemetry
+                .runtime_metrics
+                .default_level(),
             crate::policy::MetricLevel::Detailed
         );
         assert_eq!(no_policies.policies.channel_capacity.control.node, 500);
@@ -921,7 +937,7 @@ groups:
         assert_eq!(p.policies.channel_capacity.control.pipeline, 11);
         assert_eq!(p.policies.channel_capacity.pdata, 12);
         assert_eq!(
-            p.policies.telemetry.runtime_metrics,
+            p.policies.telemetry.runtime_metrics.default_level(),
             crate::policy::MetricLevel::Normal,
             "telemetry should come from group"
         );
@@ -944,7 +960,7 @@ groups:
             "health should come from pipeline"
         );
         assert_eq!(
-            p.policies.telemetry.runtime_metrics,
+            p.policies.telemetry.runtime_metrics.default_level(),
             crate::policy::MetricLevel::Normal,
             "telemetry should come from group"
         );
@@ -958,7 +974,7 @@ groups:
         // pipeline_no_policies: telemetry and health from group, channel_capacity from engine.
         let p = find("pipeline_no_policies");
         assert_eq!(
-            p.policies.telemetry.runtime_metrics,
+            p.policies.telemetry.runtime_metrics.default_level(),
             crate::policy::MetricLevel::Normal,
             "telemetry should come from group"
         );
@@ -1336,7 +1352,7 @@ groups:
             vec![crate::health::PhaseKind::Failed]
         );
         assert_eq!(
-            obs.policies.telemetry.runtime_metrics,
+            obs.policies.telemetry.runtime_metrics.default_level(),
             crate::policy::MetricLevel::Normal
         );
         assert_eq!(

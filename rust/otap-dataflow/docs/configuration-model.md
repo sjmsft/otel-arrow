@@ -305,8 +305,13 @@ Control channel keys:
 
 Telemetry policy notes:
 
-- `telemetry.runtime_metrics` accepts `none`, `basic`, `normal`, or `detailed`
-- this level now gates:
+- `telemetry.runtime_metrics` accepts either:
+  - the legacy scalar form: `none`, `basic`, `normal`, or `detailed`
+    (kept for backward compatibility), or
+  - a structured form with a `default` level plus optional per-metric-set
+    overrides keyed by the stable metric-set names declared in the engine
+    (e.g. `pipeline.runtime_control`, `pipeline.completion`)
+- the resolved level for each metric set gates:
   - channel endpoint transport metrics
   - per-node produced/consumed outcome metrics
   - shared pipeline control-plane metrics such as `pipeline.runtime_control`
@@ -315,6 +320,32 @@ Telemetry policy notes:
 - `normal` adds message and phase counters
 - `detailed` adds latency/duration summaries and completion unwind-depth
   distribution
+
+Structured `runtime_metrics` example — keep node and channel families at
+`basic` while raising only `pipeline.runtime_control` to `detailed`:
+
+```yaml
+policies:
+  telemetry:
+    runtime_metrics:
+      default: basic
+      metric_set_overrides:
+        pipeline.runtime_control: detailed
+```
+
+Per-metric-set resolution:
+
+- the effective level for a metric set is
+  `metric_set_overrides.get(name).unwrap_or(default)`
+- resolution happens once per metric-set instance at construction; per-emit
+  gating uses the resolved scalar and is unchanged from the legacy form
+- placing the policy at `groups.<group>.pipelines.<pipeline>.policies`
+  affects only that pipeline; placing it at `groups.<group>.policies` affects
+  every pipeline in that group; placing it at top-level `policies` affects
+  every pipeline that does not override it
+- because `telemetry` is replaced as a whole between scopes, an inner scope
+  that wants to add or change a single override must restate the structured
+  `runtime_metrics` block
 
 Resolution semantics:
 

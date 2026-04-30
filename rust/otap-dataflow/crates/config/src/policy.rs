@@ -7,8 +7,10 @@ use crate::byte_units;
 use crate::health::HealthPolicy;
 use crate::transport_headers_policy::TransportHeadersPolicy;
 use schemars::JsonSchema;
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::collections::BTreeMap;
+use std::fmt::{self, Display};
 use std::time::Duration;
 
 /// Top-level policy set.
@@ -262,10 +264,20 @@ pub struct TelemetryPolicy {
     /// Enable capture of Tokio runtime internal metrics.
     #[serde(default = "default_true")]
     pub tokio_metrics: bool,
-    /// Runtime metric detail level for channel transport, node outcomes, and
+    /// Runtime metric detail policy for channel transport, node outcomes, and
     /// shared control-plane telemetry.
-    #[serde(default = "default_metric_level_basic")]
-    pub runtime_metrics: MetricLevel,
+    ///
+    /// Accepts either the legacy scalar form (`runtime_metrics: basic`) or the
+    /// structured form with a default plus per-metric-set overrides:
+    ///
+    /// ```yaml
+    /// runtime_metrics:
+    ///   default: basic
+    ///   metric_set_overrides:
+    ///     pipeline.runtime_control: detailed
+    /// ```
+    #[serde(default)]
+    pub runtime_metrics: RuntimeMetricsPolicy,
 }
 
 impl Default for TelemetryPolicy {
@@ -273,8 +285,149 @@ impl Default for TelemetryPolicy {
         Self {
             pipeline_metrics: true,
             tokio_metrics: true,
-            runtime_metrics: MetricLevel::Basic,
+            runtime_metrics: RuntimeMetricsPolicy::default(),
         }
+    }
+}
+
+/// Per-metric-set runtime metrics detail policy.
+///
+/// Combines a `default` level applied to all runtime metric sets with optional
+/// per-metric-set overrides keyed by the stable `#[metric_set(name = "...")]`
+/// names declared in the engine.
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct RuntimeMetricsPolicy {
+    /// Default detail level applied to runtime metric sets that have no
+    /// override entry.
+    #[serde(default = "default_metric_level_basic")]
+    pub default: MetricLevel,
+    /// Per-metric-set overrides. Keys are the stable metric-set names
+    /// (e.g. `pipeline.runtime_control`). Values override `default` for that
+    /// metric set only.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metric_set_overrides: BTreeMap<String, MetricLevel>,
+}
+
+impl Default for RuntimeMetricsPolicy {
+    fn default() -> Self {
+        Self {
+            default: MetricLevel::Basic,
+            metric_set_overrides: BTreeMap::new(),
+        }
+    }
+}
+
+impl RuntimeMetricsPolicy {
+    /// Constructs a policy with the given `default` level and no overrides.
+    #[must_use]
+    pub fn new(default: MetricLevel) -> Self {
+        Self {
+            default,
+            metric_set_overrides: BTreeMap::new(),
+        }
+    }
+
+    /// Returns the default detail level applied to runtime metric families
+    /// that do not have a metric-set-specific override.
+    #[must_use]
+    pub fn default_level(&self) -> MetricLevel {
+        self.default
+    }
+
+    /// Returns the effective metric level for a specific metric-set name.
+    ///
+    /// Looks up `metric_set_name` in `metric_set_overrides` and falls back to
+    /// `default` when no override exists. The lookup is intended for
+    /// construction-time use (resolved once per metric-set instance), not for
+    /// per-emit gating.
+    #[must_use]
+    pub fn effective_level(&self, metric_set_name: &str) -> MetricLevel {
+        self.metric_set_overrides
+            .get(metric_set_name)
+            .copied()
+            .unwrap_or(self.default)
+    }
+}
+
+impl From<MetricLevel> for RuntimeMetricsPolicy {
+    fn from(level: MetricLevel) -> Self {
+        Self::new(level)
+    }
+}
+
+// Custom Deserialize accepts either the legacy scalar form
+// (`runtime_metrics: basic`) or the structured map form. The scalar form
+// is normalized into `default: <level>` with an empty overrides map.
+impl<'de> Deserialize<'de> for RuntimeMetricsPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RuntimeMetricsPolicyVisitor;
+
+        impl<'de> Visitor<'de> for RuntimeMetricsPolicyVisitor {
+            type Value = RuntimeMetricsPolicy;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(
+                    "a metric level string (e.g. \"basic\") or a structured \
+                     runtime metrics policy with `default` and optional \
+                     `metric_set_overrides`",
+                )
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let level: MetricLevel =
+                    MetricLevel::deserialize(de::value::StrDeserializer::<E>::new(value))?;
+                Ok(RuntimeMetricsPolicy::new(level))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&value)
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut default_level: Option<MetricLevel> = None;
+                let mut overrides: Option<BTreeMap<String, MetricLevel>> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "default" => {
+                            if default_level.is_some() {
+                                return Err(de::Error::duplicate_field("default"));
+                            }
+                            default_level = Some(map.next_value()?);
+                        }
+                        "metric_set_overrides" => {
+                            if overrides.is_some() {
+                                return Err(de::Error::duplicate_field("metric_set_overrides"));
+                            }
+                            overrides = Some(map.next_value()?);
+                        }
+                        other => {
+                            return Err(de::Error::unknown_field(
+                                other,
+                                &["default", "metric_set_overrides"],
+                            ));
+                        }
+                    }
+                }
+                Ok(RuntimeMetricsPolicy {
+                    default: default_level.unwrap_or(MetricLevel::Basic),
+                    metric_set_overrides: overrides.unwrap_or_default(),
+                })
+            }
+        }
+
+        deserializer.deserialize_any(RuntimeMetricsPolicyVisitor)
     }
 }
 
@@ -511,7 +664,7 @@ impl CoreAllocation {
 }
 
 impl Display for CoreAllocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.strategy {
             CoreAllocationStrategy::AllCores => write!(f, "*"),
             CoreAllocationStrategy::CoreCount => {
@@ -546,7 +699,7 @@ pub struct CoreRange {
 }
 
 impl Display for CoreRange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.start == self.end {
             write!(f, "{}", self.start)
         } else {
@@ -667,8 +820,15 @@ mod tests {
         assert!(defaults.telemetry.pipeline_metrics);
         assert!(defaults.telemetry.tokio_metrics);
         assert_eq!(
-            defaults.telemetry.runtime_metrics,
+            defaults.telemetry.runtime_metrics.default_level(),
             super::MetricLevel::Basic
+        );
+        assert!(
+            defaults
+                .telemetry
+                .runtime_metrics
+                .metric_set_overrides
+                .is_empty()
         );
         assert_eq!(
             defaults.resources.core_allocation,
@@ -767,7 +927,11 @@ mod tests {
             runtime_metrics: detailed
         "#;
         let policy: super::TelemetryPolicy = serde_yaml::from_str(yaml).expect("parse");
-        assert_eq!(policy.runtime_metrics, super::MetricLevel::Detailed);
+        assert_eq!(
+            policy.runtime_metrics.default_level(),
+            super::MetricLevel::Detailed
+        );
+        assert!(policy.runtime_metrics.metric_set_overrides.is_empty());
         assert!(!policy.tokio_metrics);
     }
 
@@ -777,7 +941,107 @@ mod tests {
             pipeline_metrics: true
         "#;
         let policy: super::TelemetryPolicy = serde_yaml::from_str(yaml).expect("parse");
-        assert_eq!(policy.runtime_metrics, super::MetricLevel::Basic);
+        assert_eq!(
+            policy.runtime_metrics.default_level(),
+            super::MetricLevel::Basic
+        );
+    }
+
+    #[test]
+    fn telemetry_policy_with_structured_runtime_metrics() {
+        let yaml = r#"
+            runtime_metrics:
+              default: basic
+              metric_set_overrides:
+                pipeline.runtime_control: detailed
+                pipeline.completion: normal
+        "#;
+        let policy: super::TelemetryPolicy = serde_yaml::from_str(yaml).expect("parse");
+        let rm = &policy.runtime_metrics;
+        assert_eq!(rm.default_level(), super::MetricLevel::Basic);
+        assert_eq!(
+            rm.effective_level("pipeline.runtime_control"),
+            super::MetricLevel::Detailed
+        );
+        assert_eq!(
+            rm.effective_level("pipeline.completion"),
+            super::MetricLevel::Normal
+        );
+        // Unknown metric set falls back to default.
+        assert_eq!(
+            rm.effective_level("node.consumer"),
+            super::MetricLevel::Basic
+        );
+    }
+
+    #[test]
+    fn telemetry_policy_structured_with_default_only() {
+        let yaml = r#"
+            runtime_metrics:
+              default: detailed
+        "#;
+        let policy: super::TelemetryPolicy = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(
+            policy.runtime_metrics.default_level(),
+            super::MetricLevel::Detailed
+        );
+        assert!(policy.runtime_metrics.metric_set_overrides.is_empty());
+    }
+
+    #[test]
+    fn telemetry_policy_structured_default_defaults_to_basic_when_omitted() {
+        let yaml = r#"
+            runtime_metrics:
+              metric_set_overrides:
+                pipeline.runtime_control: detailed
+        "#;
+        let policy: super::TelemetryPolicy = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(
+            policy.runtime_metrics.default_level(),
+            super::MetricLevel::Basic
+        );
+        assert_eq!(
+            policy
+                .runtime_metrics
+                .effective_level("pipeline.runtime_control"),
+            super::MetricLevel::Detailed
+        );
+    }
+
+    #[test]
+    fn runtime_metrics_policy_serde_roundtrip_structured() {
+        use super::{MetricLevel, RuntimeMetricsPolicy};
+        let mut overrides = std::collections::BTreeMap::new();
+        let _ = overrides.insert(
+            "pipeline.runtime_control".to_string(),
+            MetricLevel::Detailed,
+        );
+        let policy = RuntimeMetricsPolicy {
+            default: MetricLevel::Basic,
+            metric_set_overrides: overrides,
+        };
+        let json = serde_json::to_string(&policy).expect("serialize");
+        let back: RuntimeMetricsPolicy = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, policy);
+    }
+
+    #[test]
+    fn runtime_metrics_policy_deserialize_scalar_form() {
+        use super::{MetricLevel, RuntimeMetricsPolicy};
+        let policy: RuntimeMetricsPolicy = serde_yaml::from_str("normal").expect("parse");
+        assert_eq!(policy.default_level(), MetricLevel::Normal);
+        assert!(policy.metric_set_overrides.is_empty());
+    }
+
+    #[test]
+    fn runtime_metrics_policy_rejects_unknown_field() {
+        let yaml = r#"
+            runtime_metrics:
+              default: basic
+              bogus: 1
+        "#;
+        let res: Result<super::TelemetryPolicy, _> = serde_yaml::from_str(yaml);
+        assert!(res.is_err(), "expected unknown-field rejection");
     }
 
     #[test]

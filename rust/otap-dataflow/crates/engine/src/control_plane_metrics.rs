@@ -929,3 +929,74 @@ impl PipelineCompletionMetricsState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::{ControllerContext, PipelineContext, PipelineContextParams};
+    use otap_df_config::{PipelineGroupId, PipelineId};
+
+    fn build_pipeline_context() -> (PipelineContext, MetricsReporter) {
+        let metrics_system = otap_df_telemetry::InternalTelemetrySystem::default();
+        let (_rx, reporter) = MetricsReporter::create_new_and_receiver(16);
+        let controller = ControllerContext::new(metrics_system.registry());
+        let params = PipelineContextParams {
+            pipeline_group_id: PipelineGroupId::default(),
+            pipeline_id: PipelineId::default(),
+            core_id: 0,
+            num_cores: 1,
+            thread_id: 0,
+        };
+        let ctx = PipelineContext::new(controller, params);
+        let pipeline_entity_key = ctx.register_pipeline_entity();
+        let guard = crate::entity_context::set_pipeline_entity_key(
+            ctx.metrics_registry(),
+            pipeline_entity_key,
+        );
+        // Test scope is short-lived; the registry is owned by `metrics_system`
+        // which is dropped at end of test. Forget the guard so it doesn't
+        // unregister before we observe state.
+        std::mem::forget(guard);
+        (ctx, reporter)
+    }
+
+    #[test]
+    fn runtime_control_metrics_none_does_not_register_metric_set() {
+        let (ctx, reporter) = build_pipeline_context();
+        let state = RuntimeControlMetricsState::new(&ctx, reporter, MetricLevel::None, 0, 0, 0);
+        assert!(
+            state.metric_set_key().is_none(),
+            "MetricLevel::None should not register a metric set"
+        );
+    }
+
+    #[test]
+    fn runtime_control_metrics_basic_registers_metric_set() {
+        let (ctx, reporter) = build_pipeline_context();
+        let state = RuntimeControlMetricsState::new(&ctx, reporter, MetricLevel::Basic, 0, 0, 0);
+        assert!(
+            state.metric_set_key().is_some(),
+            "MetricLevel::Basic should register a metric set"
+        );
+    }
+
+    #[test]
+    fn pipeline_completion_metrics_none_does_not_register_metric_set() {
+        let (ctx, reporter) = build_pipeline_context();
+        let state = PipelineCompletionMetricsState::new(&ctx, reporter, MetricLevel::None);
+        assert!(
+            state.metrics.is_none(),
+            "MetricLevel::None should not register a completion metric set"
+        );
+    }
+
+    #[test]
+    fn pipeline_completion_metrics_basic_registers_metric_set() {
+        let (ctx, reporter) = build_pipeline_context();
+        let state = PipelineCompletionMetricsState::new(&ctx, reporter, MetricLevel::Basic);
+        assert!(
+            state.metrics.is_some(),
+            "MetricLevel::Basic should register a completion metric set"
+        );
+    }
+}

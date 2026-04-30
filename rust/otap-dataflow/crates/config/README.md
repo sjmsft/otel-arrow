@@ -131,11 +131,29 @@ Control channel keys:
 
 Telemetry policy note:
 
-- `policies.telemetry.runtime_metrics` accepts `none`, `basic`, `normal`, or
-  `detailed`
+- `policies.telemetry.runtime_metrics` accepts either:
+  - the legacy scalar form: `none`, `basic`, `normal`, or `detailed` (kept for
+    backward compatibility), or
+  - a structured form with a `default` level plus optional per-metric-set
+    overrides keyed by the stable metric-set names declared in the engine
+    (e.g. `pipeline.runtime_control`, `pipeline.completion`)
 - it gates channel endpoint transport metrics, per-node produced/consumed
   outcome metrics, and the shared control-plane metric families exported on the
   pipeline entity (`pipeline.runtime_control` and `pipeline.completion`)
+- structured example:
+
+  ```yaml
+  policies:
+    telemetry:
+      runtime_metrics:
+        default: basic
+        metric_set_overrides:
+          pipeline.runtime_control: detailed
+  ```
+
+  Each metric set's effective level is resolved at construction time as
+  `metric_set_overrides.get(name).unwrap_or(default)`; per-emit gating uses the
+  resolved scalar and is unchanged from the legacy form.
 
 Resolution precedence:
 

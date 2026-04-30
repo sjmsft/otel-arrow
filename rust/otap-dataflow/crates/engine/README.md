@@ -660,12 +660,20 @@ The engine emits telemetry in terms of process, core, pipeline runtime, and
 node identity. These attributes let operators and contributors correlate engine
 metrics and events with the runtime structure described above.
 
-The `policies.telemetry.runtime_metrics` level now gates three related
+The `policies.telemetry.runtime_metrics` policy gates three related
 observability surfaces:
 
 - channel endpoint transport metrics
 - per-node produced/consumed outcome metrics
 - shared pipeline-scoped control-plane metrics
+
+It accepts either the legacy scalar form (`runtime_metrics: basic`) or a
+structured form with a `default` level plus optional per-metric-set overrides.
+With the structured form, `pipeline.runtime_control` and `pipeline.completion`
+can be raised or lowered independently of the family-wide default. The
+effective level for a given metric set is
+`metric_set_overrides.get(name).unwrap_or(default)`, resolved once per
+metric-set instance at construction.
 
 For the shared control plane, the engine exports two pipeline metric families:
 

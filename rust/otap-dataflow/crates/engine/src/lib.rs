@@ -713,7 +713,8 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
 
         self.validate_connection_wiring_contracts(&config)?;
 
-        let channel_metrics_enabled = telemetry_policy.runtime_metrics >= MetricLevel::Basic;
+        let channel_metrics_enabled =
+            telemetry_policy.runtime_metrics.default_level() >= MetricLevel::Basic;
 
         // First pass: allocate all node IDs from the build_state.
         let mut receiver_count = 0usize;

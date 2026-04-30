@@ -200,8 +200,10 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable> RuntimePipeli
             telemetry_policy,
         } = self;
 
-        let metric_level = telemetry_policy.runtime_metrics;
-        let node_interests = Interests::from_metric_level(metric_level);
+        let runtime_metrics_policy = telemetry_policy.runtime_metrics.clone();
+        let node_interests = Interests::from_metric_level(runtime_metrics_policy.default_level());
+        let completion_emission_level =
+            runtime_metrics_policy.effective_level("node.completion_emission");
 
         // Single-threaded runtime so we can drive !Send node tasks on the core thread.
         let rt = Builder::new_current_thread()
@@ -227,7 +229,7 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable> RuntimePipeli
             let node_entity_key = telemetry_guard.as_ref().map(|t| t.entity_key());
             let telemetry_handle = telemetry_guard.as_ref().map(|t| t.handle());
             let completion_emission_metrics =
-                make_completion_emission_metrics(&telemetry_handle, metric_level);
+                make_completion_emission_metrics(&telemetry_handle, completion_emission_level);
             // Collect per-node metrics for the controller (exporters have no output channels).
             node_metric_entries.push((
                 node_id.index,
@@ -284,7 +286,7 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable> RuntimePipeli
             let node_entity_key = telemetry_guard.as_ref().map(|t| t.entity_key());
             let telemetry_handle = telemetry_guard.as_ref().map(|t| t.handle());
             let completion_emission_metrics =
-                make_completion_emission_metrics(&telemetry_handle, metric_level);
+                make_completion_emission_metrics(&telemetry_handle, completion_emission_level);
             // Collect per-node metrics for the controller.
             node_metric_entries.push((
                 node_id.index,

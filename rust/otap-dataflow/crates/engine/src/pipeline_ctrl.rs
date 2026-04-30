@@ -299,7 +299,9 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
             runtime_control_metrics: RuntimeControlMetricsState::new(
                 &pipeline_context,
                 metrics_reporter.clone(),
-                telemetry_policy.runtime_metrics,
+                telemetry_policy
+                    .runtime_metrics
+                    .effective_level("pipeline.runtime_control"),
                 0,
                 0,
                 0,
@@ -692,7 +694,7 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
         // next periodic interval elapses.
         self.report_runtime_control_metrics();
 
-        if self.telemetry.runtime_metrics >= MetricLevel::Normal {
+        if self.telemetry.runtime_metrics.default_level() >= MetricLevel::Normal {
             let _ = self.report_node_metrics();
         }
 
@@ -795,14 +797,14 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
             }
         }
 
-        if self.telemetry.runtime_metrics >= MetricLevel::Basic {
+        if self.telemetry.runtime_metrics.default_level() >= MetricLevel::Basic {
             for metrics in &self.channel_metrics {
                 if let Err(err) = metrics.report(&mut self.metrics_reporter) {
                     otel_warn!("channel.metrics.reporting.fail", error = err.to_string());
                 }
             }
         }
-        if self.telemetry.runtime_metrics >= MetricLevel::Normal {
+        if self.telemetry.runtime_metrics.default_level() >= MetricLevel::Normal {
             if let Err(err) = self.report_node_metrics() {
                 otel_warn!("node.metrics.reporting.fail", error = err.to_string());
             }
@@ -914,7 +916,9 @@ impl<PData> PipelineCompletionMsgDispatcher<PData> {
             completion_metrics: PipelineCompletionMetricsState::new(
                 &pipeline_context,
                 metrics_reporter,
-                telemetry_policy.runtime_metrics,
+                telemetry_policy
+                    .runtime_metrics
+                    .effective_level("pipeline.completion"),
             ),
         }
     }
@@ -3164,7 +3168,7 @@ mod tests {
         });
 
         let telemetry_policy = TelemetryPolicy {
-            runtime_metrics: MetricLevel::Detailed,
+            runtime_metrics: MetricLevel::Detailed.into(),
             ..Default::default()
         };
 
@@ -3431,7 +3435,7 @@ mod tests {
             TelemetryPolicy {
                 pipeline_metrics: false,
                 tokio_metrics: false,
-                runtime_metrics: metric_level,
+                runtime_metrics: metric_level.into(),
             },
             Vec::new(),
             empty_node_metric_handles(),
@@ -3508,7 +3512,7 @@ mod tests {
             TelemetryPolicy {
                 pipeline_metrics: false,
                 tokio_metrics: false,
-                runtime_metrics: MetricLevel::None,
+                runtime_metrics: MetricLevel::None.into(),
             },
             Vec::new(),
             empty_node_metric_handles(),
@@ -3616,7 +3620,7 @@ mod tests {
             TelemetryPolicy {
                 pipeline_metrics: false,
                 tokio_metrics: false,
-                runtime_metrics: metric_level,
+                runtime_metrics: metric_level.into(),
             },
         );
         let completion_metrics_key = dispatcher.completion_metrics.metric_set_key();

@@ -149,7 +149,7 @@ pub(super) fn build_manager<PData>(
         metrics_reporter,
         DST_CONTROL_PLANE_METRICS_FLUSH_INTERVAL,
         TelemetryPolicy {
-            runtime_metrics: MetricLevel::None,
+            runtime_metrics: MetricLevel::None.into(),
             pipeline_metrics: false,
             tokio_metrics: false,
         },
